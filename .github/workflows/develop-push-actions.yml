@@ -1,0 +1,53 @@
+name: github-actions-develop
+on:
+  push:
+    branches:
+      - develop
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout project sources
+        uses: actions/checkout@v3
+      - name: setup java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin' # See 'Supported distributions' for available options
+          java-version: '17'
+
+      # build and test
+      - name: setup gradle
+        uses: gradle/gradle-build-action@v2
+      - name: build step
+        run:
+          ./gradlew build
+      - name: test step
+        run:
+          ./gradlew test
+
+      # build and push docker image
+      - name: Docker Hub build & push
+        run:  |
+          docker login -u ${{ secrets.DOCKER_LOGINID }} -p ${{ secrets.DOCKER_PASSWORD }}
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest .
+          docker images
+          docker push ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
+
+      - run: echo "🎉 build and deploy docker hub success"
+
+      # deploy develop server
+      - name: ssh-connect
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.DEVELOP_SERVER_IP }}
+          username: ${{ secrets.DEVELOP_SERVER_USERNAME }}
+          key: ${{ secrets.DEVELOP_SERVER_KEY }}
+          script: |
+            docker rmi -f ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
+            docker login -u ${{ secrets.DOCKER_LOGINID }} -p ${{ secrets.DOCKER_PASSWORD }}
+            docker pull ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
+            docker images
+            docker run -d -p 8080:8080 ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest --PROFILE=develop
+
+      # end
+      - run: echo "🎉 deploy develop server success"
